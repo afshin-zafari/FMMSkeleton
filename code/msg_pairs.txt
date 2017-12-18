@@ -1,0 +1,39 @@
+find idle
+            /dlb.cpp, 199, findIdleNode                    , tid: 77109700,   3015 ::send FIND_IDLE to :2
+            /dlb.cpp, 199, findIdleNode                    , tid: 77109700,   3113 ::send FIND_IDLE to :4
+
+recv accept
+    /eng_process.cpp, 287, processEvent                    , tid: 77109700,   3207 ::ACCEPT  tag recvd from 4
+recv decline
+    /eng_process.cpp, 281, processEvent                    , tid: 77109700,   3113 :: DECLINE  tag recvd from 2
+---------------
+find busy
+            /dlb.cpp, 168, doDLB                           , tid: 77109700,   2883 ::find busy
+            /dlb.cpp, 187, findBusyNode                    , tid: F2DFD700,   1534 ::send FIND_BUSY to :3
+        /mailbox.cpp,  43, send                            , tid: F2DFD700,   1534 ::buf:0x1072910, len:1, tag:9
+
+import task
+    /eng_process.cpp, 293, processEvent                    , tid: 39203700,   3432 ::TASKS imported from 1
+import data
+    /eng_process.cpp, 299, processEvent                    , tid: 39203700,   3433 ::DATA imported from 1
+        /dt_task.cpp, 414, importData                      , tid: 39203700,   3434 ::imported data A(7).
+
+export task out data
+            /dlb.cpp, 594, checkImportedTasks              , tid: 39203700,   6291 ::task DLB_SIM-146 out data C(31) is returned back to 1.
+recv decline
+    /eng_process.cpp, 281, processEvent                    , tid: 77109700,   3113 :: DECLINE  tag recvd from 2
+---------------
+export tasks
+            /dlb.cpp, 535, exportTask                      , tid: BD956700,   3363 ::task:TStep-0_3_Add-10
+            /dlb.cpp, 307, exportTasks                     , tid: 77109700,   3216 ::no task for export,restart
+        /mailbox.cpp,  43, send                            , tid: BD956700,   3365 ::buf:0x2b4ee40e9740, len:174, tag:10
+        /mailbox.cpp,  43, send                            , tid: BD956700,   3365 ::buf:0x2b4eb37c7010, len:997064, tag:11
+send completed
+        /mailbox.cpp, 259, getEvent                        , tid: BD956700,   3365 ::AnySendCompleted=True, tag:10. 
+        /mailbox.cpp, 259, getEvent                        , tid: BD956700,   3447 ::AnySendCompleted=True, tag:11. 
+---------------
+recv task out data
+        /mailbox.cpp, 243, getEvent                        , tid: BD956700,   5747 ::DLB DATA rcv src:5,tag:14,len:997064,buf:0x2b4eb8f77010
+       /mpi_comm.cpp,  89, receive                         , tid: BD956700,   5748 ::res:0, src:5, tag:14, st.len:997064
+    /eng_process.cpp, 305, processEvent                    , tid: BD956700,   5748 ::result for exported task is imported from 5
+            /dlb.cpp, 369, receiveTaskOutData              , tid: BD956700,   5748 ::task out data C(7) is returned back.
