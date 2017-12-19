@@ -20,6 +20,7 @@ namespace dtsw{
     /*---------------------------------------------------------------------------*/
     DTSWData();
     /*---------------------------------------------------------------------------*/
+    DTSWData ( int ,int M);
     DTSWData ( int r,int M, const char  *n);
     DTSWData (int M, int N, int r,int c, std::string n, int , int , bool isSparse = false);
     void add_nnz(int z){nnz +=z;}
@@ -69,6 +70,30 @@ namespace dtsw{
   public:
     IterationData();
   };
+  /*---------------------------------------------------------------------------*/
   
+  class Node{
+  public:
+    typedef vector<Node*> NodeList;
+    Node *parent;
+    NodeList children,int_acts,neighbors;
+    Data *data;
+  };
+  typedef vector<Node*> NodeList;
+  /*---------------------------------------------------------------------------*/
+  class xLevel{
+  public:
+    NodeList nodes;    
+    int box_size,host;
+    xLevel(){host=0;}
+  };
+  typedef vector<xLevel*> LevelList;
+  /*---------------------------------------------------------------------------*/
+  class Tree{
+  public:
+    LevelList levels;
+    Node &operator()(int,int);
+  };
+  /*---------------------------------------------------------------------------*/
 }
 #endif //DT_DATABASE_HPP

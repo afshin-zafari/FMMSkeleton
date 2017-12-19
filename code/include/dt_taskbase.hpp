@@ -11,6 +11,7 @@
 #include "sg/platform/atomic.hpp"
 
 namespace dtsw{
+  class Node;
   class SWTask: public IDuctteipTask {
   private:
   public:
@@ -111,6 +112,8 @@ namespace dtsw{
   private:
     dtsw::Data *A,*B,*C;
   public:
+    DLBTask(Node &,SWTask *);
+    DLBTask(Node &,Node&,SWTask *);
     DLBTask(dtsw::Data &a, dtsw::Data &b, dtsw::Data &c,SWTask *p);
     void runKernel();
     void submit_next_level_tasks(){}

@@ -8,12 +8,204 @@ namespace dtsw{
   /*----------------------------------------*/
   Parameters_t Parameters;
   Data *A,*B,*C;
+  Tree *mainF;
   SWAlgorithm *sw_engine;
   /*----------------------------------------------------*/
-  void runStep(SWTask*);
   IterationData *TimeStepsTask::D = nullptr;
   int TimeStepsTask::last_step=0;
+  /*----------------------------------------------------*/
+  void runStep(SWTask *p){
+    Tree &F = *mainF;
+    int ell,n;
+    int L = F.levels.size();
+    ell = L -1;
+    int nnode=F.levels[ell]->nodes.size();
+    for(n=0;n<nnode;n++){
+      DLBTask *finestC2P=new DLBTask(F(ell,n),p);
+      sw_engine->submit(finestC2P);
+    }
+    for(;ell>0;ell--){
+      nnode=F.levels[ell]->nodes.size();
+      for(n=0;n<nnode;n++){
+	for(Node *nbr : F(ell,n).neighbors){
+	  DLBTask *NBR=new DLBTask(*nbr,F(ell,n),p);
+	  sw_engine->submit(NBR);
+	}      
+	for(Node *intact : F(ell,n).int_acts){
+	  DLBTask *XLT=new DLBTask(*intact,F(ell,n),p);
+	  sw_engine->submit(XLT);
+	}      
+	DLBTask *C2P=new DLBTask(F(ell,n),*F(ell,n).parent,p);
+	sw_engine->submit(C2P);            
+      }
+    }
+    for(ell=0;ell<L-1;ell++){
+      nnode=F.levels[ell]->nodes.size();
+      for(n=0;n<nnode;n++){
+	for(Node* ch: F(ell,n).children){
+	  DLBTask *P2C = new DLBTask(F(ell,n),*ch,p);
+	  sw_engine->submit(P2C);            
+	}
+      }
+    }
+    ell = L -1;
+    nnode=F.levels[ell]->nodes.size();
+    for(n=0;n<nnode;n++){
+	for(Node* ch: F(ell,n).children){
+	  DLBTask *finestP2C=new DLBTask(F(ell,n),*ch,p);
+	  sw_engine->submit(finestP2C);
+	}
+    }
+    
+  }
+  /*----------------------------------------------------*/
+  DLBTask::DLBTask(Node&b,SWTask *p){
+    B = static_cast<Data *>(b.data);
+      
+    host = B->getHost();
+    task_parent = p;
+    if (p)
+      step_no = p->step_no;
+    child_count = 0 ;
+    if ( host == me )
+      if ( task_parent )
+	Atomic::increase(&task_parent->child_count);
+    setNameWithParent("_Add");
+    message_buffer = new MessageBuffer(getPackSize(),0);
+    parent_context= sw_engine;
+    *this >> *B ;      
+  }
+  /*----------------------------------------------------*/
+  DLBTask::DLBTask(Node&a,Node&b,SWTask *p){
+    A = static_cast<Data *>(a.data);
+    B = static_cast<Data *>(b.data);
+      
+    host = B->getHost();
+    task_parent = p;
+    if (p)
+      step_no = p->step_no;
+    child_count = 0 ;
+    if ( host == me )
+      if ( task_parent )
+	Atomic::increase(&task_parent->child_count);
+    setNameWithParent("_Add");
+    message_buffer = new MessageBuffer(getPackSize(),0);
+    parent_context= sw_engine;
+    *this << *A >> *B ;      
+  }
+  /*----------------------------------------------------------------*/
+  DTSWData::DTSWData(){      
+    memory_type = USER_ALLOCATED;
+    host_type=SINGLE_HOST;
+    IData::parent_data = NULL;
+    setDataHandle( sw_engine->createDataHandle(this));
+    setDataHostPolicy( glbCtx.getDataHostPolicy() ) ;
+    setLocalNumBlocks(1,1);
+    IData::Mb = 0;
+    IData::Nb = 0;
+    setHostType(SINGLE_HOST);
+    setParent(sw_engine);
+    sw_engine->addInputData(this);
+    LOG_INFO(LOG_DTSW_DATA,"Data handle for new dtswdata:%d\n",my_data_handle->data_handle);
+    setRunTimeVersion("0.0",0);
+  }
   /*----------------------------------------*/
+  DTSWData::DTSWData(int z, int host_){
+    mem_size_in_bytes = z;
+    memory_p = new byte[z];
+    mem_size_in_elements = z  / sizeof(double);
+    setHost(host_);
+    setHostType(SINGLE_HOST);
+    allocateMemory();
+  }
+  /*----------------------------------------*/
+  Node &Tree::operator()(int l, int n){
+    return *levels[l]->nodes[n];
+  }
+  /*----------------------------------------*/
+  void init_tree(){
+    mainF = new Tree;
+    Tree *F = mainF;
+    int L=10;
+    for(int level=0;level<L;level++){
+      F->levels.push_back(new xLevel);
+    }
+    double s=1000;
+    for(int level=L-1;level>=0;level--){
+      F->levels[level]->box_size = s;
+      s *= 2;
+    }
+    int npl=1; //node per level
+    const int percent=60;
+    for(int level=0;level<L;level++){
+      int J = npl * percent / 100 +1;
+      for(int j=0;j<J;j++){
+	F->levels[level]->nodes.push_back(new Node);
+      }
+      npl *= 8;
+    }
+    //intact + nbr
+    for(int level=0;level<L;level++){
+      int J = F->levels[level]->nodes.size();
+      for(int j=0;j<J;j++){
+	Node *node;
+	int k,K = 27 * percent / 100 +1;
+	for( k=0;k<K;k++){
+	  node = F->levels[level]->nodes[J-k];
+	  F->levels[level]->nodes[j]->neighbors.push_back(node);
+	}
+	for(;k<J;k++){
+	  node = F->levels[level]->nodes[J-k];
+	  F->levels[level]->nodes[j]->int_acts.push_back(node);
+	}
+      }
+    }
+    //parent+children    
+    for(int level=0;level<L-1;level++){
+      int pnodes = F->levels[level  ]->nodes.size();
+      int cnodes = F->levels[level+1]->nodes.size();
+      int nc = cnodes/pnodes+1;
+      Node *parent,*child;
+      for(int px=0;px<pnodes;px++){
+	parent = F->levels[level]->nodes[px];	
+	for(int cx=0;cx<nc;cx++){
+	  if (cx+px*nc < cnodes){
+	    child = F->levels[level+1]->nodes[cx+px*nc];
+	    child->parent = parent;
+	    parent->children.push_back(child);
+	  }
+	  else{
+	    fprintf(stderr,"Index out of range,%d,%d,%d,%d,%d.\n",cx,nc,px,cnodes,pnodes);
+	  }
+	}
+      }
+    }
+
+    for(int level=0;level<L;level++){
+      int nnodes = F->levels[level]->nodes.size();
+      for(int i=0;i<nnodes;i++){
+	Node *node=F->levels[level]->nodes[i];
+	int host,s = F->levels[level]->box_size;
+	if ( level == 0 ) {
+	  host = 0;
+	  F->levels[level]->host=-1;
+	}
+	else{
+	  if (F->levels[level-1]->host==-1){
+	    if (F->levels[level]->nodes.size() > Parameters.P){
+	      host = i % Parameters.P;
+	      F->levels[level]->host=0;	      
+	    }
+	  }
+	  else{
+	    host = node->parent->data->getHost();
+	  }
+	}
+	node->data = new Data(s,host);
+      }
+    }    
+  }
+  
   /*----------------------------------------*/
   void parse_args(int argc,char *argv[]){
     Parameters.M          = 1    ; // MB
@@ -57,15 +249,12 @@ namespace dtsw{
   /*----------------------------------------*/
   void init(int argc, char *argv[]){
     parse_args(argc,argv);
-    dtEngine.set_memory_policy(engine::ENGINE_ALLOCATION);		
+    dtEngine.set_memory_policy(engine::ALL_USER_ALLOCATED);
     dtEngine.start(argc,argv);
     sw_engine = new SWAlgorithm(20,false);
     dtEngine.set_user_context(sw_engine);
-    int r = Parameters.lambda_star * Parameters.K;
-    A = new DTSWData (r,Parameters.M,"A");
-    B = new DTSWData (r,Parameters.M,"B");
-    C = new DTSWData (r,Parameters.M,"C");
-    LOG_INFO(LOG_DLBSIM,"C(1).host=%d, C.rows=%d.\n",(*C)(1).getHost(),C->get_rows());
+    init_tree();
+    //LOG_INFO(LOG_DLBSIM,"C(1).host=%d, C.rows=%d.\n",(*C)(1).getHost(),C->get_rows());
   }
   /*----------------------------------------*/
   void finalize(){
@@ -116,18 +305,10 @@ namespace dtsw{
   /*----------------------------------------------------*/
   void DLBTask::runKernel(){
     for(int i=0;i<  config.getNumThreads()-1;i++){
-      SGDLBTask *t=new SGDLBTask(Parameters.W);  
+      SGDLBTask *t=new SGDLBTask(B->get_mem_size_in_bytes());  
       sw_engine->subtask(this,t);
     }
     set_submitting(false);
-  }
-  /*----------------------------------------------------*/
-  void runStep(SWTask *p){
-    Data &a=*A,&b=*B,&c=*C;
-    for (int i=0;i<c.get_rows();i++){
-      sw_engine->submit( new DLBTask(a(i),b(i),c(i),p)
-			 );
-    }    
   }
   /*----------------------------------------------------------------*/
   TimeStepsTask::~TimeStepsTask(){
@@ -152,21 +333,6 @@ namespace dtsw{
 	     TimeStepsTask::D->getRunTimeVersion(IData::READ).dumpString().c_str(),
 	     TimeStepsTask::D->getRunTimeVersion(IData::WRITE).dumpString().c_str());
     host = me;
-  }
-  /*----------------------------------------------------------------*/
-  DTSWData::DTSWData(){      
-    memory_type = SYSTEM_ALLOCATED;
-    host_type=SINGLE_HOST;
-    IData::parent_data = NULL;
-    setDataHandle( sw_engine->createDataHandle(this));
-    setDataHostPolicy( glbCtx.getDataHostPolicy() ) ;
-    setLocalNumBlocks(1,1);
-    IData::Mb = 0;
-    IData::Nb = 0;
-    setHostType(SINGLE_HOST);
-    setParent(sw_engine);
-    sw_engine->addInputData(this);
-    LOG_INFO(LOG_DTSW_DATA,"Data handle for new dtswdata:%d\n",my_data_handle->data_handle);
   }
   /*----------------------------------------------------------------*/
   IterationData::IterationData(){      
